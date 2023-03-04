@@ -1,4 +1,4 @@
-import { Router } from "oak/mod.ts";
+import { Router } from "../../dep.ts";
 import { getAiCard, getTextCard } from "./aiCard.ts";
 import { createEventHandler, lark } from "../../utils/lark.ts";
 import { getCompletionDelta, Message } from "./openaiClient.ts";

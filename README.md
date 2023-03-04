@@ -19,9 +19,9 @@ Built with:
 ### Run without clone
 
 1. Create `config.js` (See [config.example.js](config.example.js)).
-2. Run `deno run -A https://raw.github.com/lideming/lark-ai-bot/master/mod.ts`
+2. Run `deno run -A https://raw.github.com/lideming/lark-ai-bot/master/src/app.ts`
     - or (for permission control)  
-      `deno run --allow-net --allow-read --allow-write=data --allow-env https://raw.github.com/lideming/lark-ai-bot/master/mod.ts`
+      `deno run --allow-net --allow-read --allow-write=data --allow-env https://raw.github.com/lideming/lark-ai-bot/master/src/app.ts`
 
 ### Clone and run from local source
 

@@ -1,4 +1,4 @@
-import { Application, Router } from "oak/mod.ts";
+import { Application, Router } from "./dep.ts";
 import { AppConfig, Config } from "./config.ts";
 import { loggingMiddleware } from "./utils/middlewares.ts";
 

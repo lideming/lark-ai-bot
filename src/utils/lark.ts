@@ -1,5 +1,5 @@
 import * as lark from "npm:@larksuiteoapi/node-sdk";
-import { Middleware } from "oak/mod.ts";
+import { Middleware } from "../dep.ts";
 
 export { lark };
 

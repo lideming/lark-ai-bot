@@ -1,4 +1,4 @@
-import { Middleware } from "oak/mod.ts";
+import { Middleware } from "../dep.ts";
 
 export const loggingMiddleware: Middleware = async (ctx, next) => {
   const begin = Date.now();
