@@ -5,12 +5,14 @@ return {
     myAiBot: {
       // This defines a AI chat bot, and App Path is "myAiBot"
       type: "ai",
+
       token: "", // OpenAI api key
       // systemPrompt: "One line answers by default.",
+
       lark: {
         appId: "",
         appSecret: "",
-        verificationToken: "",
+        verificationToken: "", // in "Event Subscriptions"
       },
     },
     // Multiple instances are supported

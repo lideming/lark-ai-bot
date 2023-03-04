@@ -29,7 +29,9 @@ Built with:
 2. `cp config.example.js config.js` and edit `config.js`
 3. Run `run.sh` (Deno 1.28+ is required)
 
-## Configure Event and Webhooks
+## Configure on Lark/Feishu Open Platform
+
+### Event and Webhooks
 
 Event and webhooks should be enabled and configured in Lark/Feishu Developer Console.
 
@@ -38,6 +40,15 @@ In *Event Subscriptions*, set *Request URL* to `<API_HOST>/<APP_PATH>/events`, a
 In *Features - Bot*, set *Message Card Request URL* to `<API_HOST>/<APP_PATH>/interactive-events`.
 
 (`<APP_PATH>` is the key of `apps` config object.)
+
+### Permissions
+
+Required permissions:
+
+- im:message.group_at_msg
+- im:message.p2p_msg
+- im:message:send_as_bot
+- im:message.groups
 
 [Deno]: https://deno.land/
 [Oak]: https://deno.land/x/oak
