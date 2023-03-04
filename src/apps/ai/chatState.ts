@@ -1,4 +1,4 @@
-import { Message } from "./openaiClient.ts";
+import { Message } from "./ai.ts";
 import { Database, IDbDocSet } from "https://deno.land/x/btrdb@v0.8.3/mod.ts";
 import { getDatabase } from "../../utils/db.ts";
 

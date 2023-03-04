@@ -1,9 +1,14 @@
 import { Router } from "../../dep.ts";
 import { getAiCard, getTextCard } from "./aiCard.ts";
 import { createEventHandler, lark } from "../../utils/lark.ts";
-import { getCompletionDelta, Message } from "./openaiClient.ts";
+import {
+  getCompletionStream,
+  Message,
+} from "https://deno.land/x/openai_chat_stream@1.0.1/mod.ts";
 import { ChatStore } from "./chatState.ts";
 import { AppConfig } from "../../config.ts";
+
+export type { Message };
 
 export interface AiAppConfig extends AppConfig {
   // OpenAI api key
@@ -150,37 +155,20 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       let text = "";
       let timer = 0;
-      let cardSent = false;
       let finished = false;
 
-      getCompletionDelta({
+      const stream = getCompletionStream({
         apiKey: appConfig.token,
         messages: promptMessages,
-        onDelta: (delta) => {
-          text += delta;
-          botMsg.content += delta;
-          delayUpdateCard();
-        },
         onFinished: (reason) => {
           if (reason !== "stop") {
             text += "\n[FINISHED: " + reason + "]";
           }
         },
-      }).catch((err) => {
-        console.error("AI error", err);
-        text += "\n[ERROR: " + err + "]";
-      }).finally(() => {
-        finished = true;
-        delayUpdateCard();
-        chatStore.updateChat(chatState);
       });
 
       const delayUpdateCard = () => {
         const updateCard = () => {
-          if (!cardSent) {
-            delayUpdateCard();
-            return;
-          }
           larkClient.im.message.patch({
             data: {
               content: JSON.stringify(
@@ -208,7 +196,21 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       });
 
       const cardMsgId = msg.data!.message_id!;
-      cardSent = true;
+
+      try {
+        for await (const delta of stream) {
+          text += delta;
+          botMsg.content += delta;
+          delayUpdateCard();
+        }
+      } catch (err) {
+        console.error("AI error", err);
+        text += "\n[ERROR: " + err + "]";
+      } finally {
+        finished = true;
+        delayUpdateCard();
+        chatStore.updateChat(chatState);
+      }
     },
   });
 
