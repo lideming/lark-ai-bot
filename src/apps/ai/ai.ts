@@ -5,7 +5,7 @@ import {
   getCompletionStream,
   Message,
 } from "https://deno.land/x/openai_chat_stream@1.0.1/mod.ts";
-import { ChatStore } from "./chatState.ts";
+import { ChatMessage, ChatStore } from "./chatState.ts";
 import { AppConfig } from "../../config.ts";
 
 export type { Message };
@@ -52,7 +52,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
   eventDispatcher.register({
     "im.message.receive_v1": async (data) => {
-      const { chat_id, chat_type, message_id } = data.message;
+      const userMsg = data.message;
+      const { chat_id, chat_type } = data.message;
       // console.info("received message", data.message);
 
       if (parseInt(data.message.create_time) < Date.now() - 10 * 1000) {
@@ -84,14 +85,14 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       const chatState = await chatStore.getChat(chat_id, chat_type);
 
-      if (textContent === "!reset") {
-        chatState.messages = [];
+      if (textContent === "!reset" || textContent === "!new") {
+        delete chatState.lastMessageId;
         await chatStore.updateChat(chatState);
         await larkClient.im.message.create({
           params: { receive_id_type: "chat_id" },
           data: {
             receive_id: chat_id,
-            content: JSON.stringify(getTextCard("[chat history cleared]")),
+            content: JSON.stringify(getTextCard("[new conversation]")),
             msg_type: "interactive",
           },
         });
@@ -139,19 +140,23 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       //   chatState.name = groupInfo.data?.name;
       // }
 
+      const replyTo = userMsg.parent_id || chatState.lastMessageId;
+
       const systemContent = chatState.settings.systemPrompt ||
         appConfig.systemPrompt;
 
-      const userInput: Message = { role: "user", content: textContent };
-      const botMsg: Message = { role: "assistant", content: "" };
+      const userInputMsg: Message = { role: "user", content: textContent };
       const promptMessages: Message[] = [];
       if (systemContent) {
         promptMessages.push({ role: "system", content: systemContent });
       }
-      promptMessages.push(...chatState.messages);
-      promptMessages.push(userInput);
-
-      chatState.messages.push(userInput, botMsg);
+      if (replyTo) {
+        const messages = await chatStore.getMessageChain(replyTo, 10);
+        promptMessages.push(
+          ...messages.map((x) => ({ role: x.role, content: x.content })),
+        );
+      }
+      promptMessages.push(userInputMsg);
 
       let text = "";
       let timer = 0;
@@ -188,7 +193,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       };
 
       const msg = await larkClient.im.message.reply({
-        path: { message_id: message_id },
+        path: { message_id: userMsg.message_id },
         data: {
           content: JSON.stringify(getAiCard("")),
           msg_type: "interactive",
@@ -197,10 +202,31 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       const cardMsgId = msg.data!.message_id!;
 
+      const storeUserMsg: ChatMessage = {
+        id: userMsg.message_id,
+        chat: chat_id,
+        time: data.message.create_time,
+        replyTo: replyTo,
+        role: "user",
+        content: textContent,
+      };
+
+      const storeBotMsg: ChatMessage = {
+        id: cardMsgId,
+        chat: chat_id,
+        time: msg.data!.create_time!,
+        replyTo: userMsg.message_id,
+        role: "assistant",
+        content: "",
+      };
+
+      await chatStore.putMessage(storeUserMsg, storeBotMsg);
+      chatState.lastMessageId = cardMsgId;
+      await chatStore.updateChat(chatState);
+
       try {
         for await (const delta of stream) {
           text += delta;
-          botMsg.content += delta;
           delayUpdateCard();
         }
       } catch (err) {
@@ -209,7 +235,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       } finally {
         finished = true;
         delayUpdateCard();
-        chatStore.updateChat(chatState);
+        storeBotMsg.content = text;
+        await chatStore.putMessage(storeBotMsg);
       }
     },
   });
