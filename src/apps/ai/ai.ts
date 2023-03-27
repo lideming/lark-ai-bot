@@ -56,7 +56,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       const { chat_id, chat_type } = data.message;
       // console.info("received message", data.message);
 
-      if (parseInt(data.message.create_time) < Date.now() - 10 * 1000) {
+      if (parseInt(data.message.create_time) < Date.now() - 30 * 1000) {
         console.info("ignored message (outdated)");
         return;
       }
@@ -85,50 +85,55 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       const chatState = await chatStore.getChat(chat_id, chat_type);
 
-      if (textContent === "!reset" || textContent === "!new") {
-        delete chatState.lastMessageId;
-        await chatStore.updateChat(chatState);
-        await larkClient.im.message.create({
-          params: { receive_id_type: "chat_id" },
-          data: {
-            receive_id: chat_id,
-            content: JSON.stringify(getTextCard("[new conversation]")),
-            msg_type: "interactive",
-          },
-        });
-        return;
-      }
-
-      if (textContent.startsWith("!system")) {
-        const systemPrompt = textContent.slice("!system".length).trim();
-        if (systemPrompt) {
-          if (systemPrompt === "default") {
-            delete chatState.settings.systemPrompt;
-          } else {
-            chatState.settings.systemPrompt = systemPrompt;
-          }
+      if (textContent.startsWith("!")) {
+        const match = textContent.match(/^!(\w+)\s*(.*)$/m)!;
+        const [_, cmd, rest] = match;
+        if (cmd === "reset" || cmd === "new") {
+          delete chatState.lastMessageId;
           await chatStore.updateChat(chatState);
           await larkClient.im.message.create({
             params: { receive_id_type: "chat_id" },
             data: {
               receive_id: chat_id,
-              content: JSON.stringify(getTextCard("[system prompt updated]")),
+              content: JSON.stringify(getTextCard("[new conversation]")),
               msg_type: "interactive",
             },
           });
-        } else {
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify(
-                getTextCard(chatState.settings.systemPrompt || "(default)"),
-              ),
-              msg_type: "interactive",
-            },
-          });
+          if (!rest) return;
+          textContent = rest;
         }
-        return;
+
+        if (cmd === "system") {
+          const systemPrompt = rest;
+          if (systemPrompt) {
+            if (systemPrompt === "default") {
+              delete chatState.settings.systemPrompt;
+            } else {
+              chatState.settings.systemPrompt = systemPrompt;
+            }
+            await chatStore.updateChat(chatState);
+            await larkClient.im.message.create({
+              params: { receive_id_type: "chat_id" },
+              data: {
+                receive_id: chat_id,
+                content: JSON.stringify(getTextCard("[system prompt updated]")),
+                msg_type: "interactive",
+              },
+            });
+          } else {
+            await larkClient.im.message.create({
+              params: { receive_id_type: "chat_id" },
+              data: {
+                receive_id: chat_id,
+                content: JSON.stringify(
+                  getTextCard(chatState.settings.systemPrompt || "(default)"),
+                ),
+                msg_type: "interactive",
+              },
+            });
+          }
+          return;
+        }
       }
 
       // if (chat_type === "group" && chatState.name === undefined) {
@@ -181,6 +186,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
               ),
             },
             path: { message_id: cardMsgId },
+          }).catch((err) => {
+            console.error("update card error", err);
           });
         };
 
