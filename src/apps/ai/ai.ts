@@ -7,6 +7,7 @@ import {
 } from "https://deno.land/x/openai_chat_stream@1.0.1/mod.ts";
 import { ChatMessage, ChatStore } from "./chatState.ts";
 import { AppConfig } from "../../config.ts";
+import { encode } from "../../dep.ts";
 
 export type { Message };
 
@@ -162,17 +163,26 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         );
       }
       promptMessages.push(userInputMsg);
+      const promptTokens = promptMessages.reduce(
+        (prev, cur) => prev + countTokens(cur.content),
+        0,
+      );
 
       let text = "";
+      let additionalInfo: string[] = [];
       let timer = 0;
       let finished = false;
+
+      additionalInfo.push(
+        `input ${promptTokens} tokens (${promptMessages.length} msg)`,
+      );
 
       const stream = getCompletionStream({
         apiKey: appConfig.token,
         messages: promptMessages,
         onFinished: (reason) => {
           if (reason !== "stop") {
-            text += "\n[FINISHED: " + reason + "]";
+            additionalInfo.push("finished reason: " + reason);
           }
         },
       });
@@ -182,7 +192,10 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
           larkClient.im.message.patch({
             data: {
               content: JSON.stringify(
-                getAiCard(text + (finished ? "" : "[...]")),
+                getAiCard(
+                  text + (finished ? "" : "[...]"),
+                  additionalInfo.join(" | "),
+                ),
               ),
             },
             path: { message_id: cardMsgId },
@@ -202,7 +215,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       const msg = await larkClient.im.message.reply({
         path: { message_id: userMsg.message_id },
         data: {
-          content: JSON.stringify(getAiCard("")),
+          content: JSON.stringify(getAiCard("", "")),
           msg_type: "interactive",
         },
       });
@@ -238,9 +251,10 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         }
       } catch (err) {
         console.error("AI error", err);
-        text += "\n[ERROR: " + err + "]";
+        additionalInfo.push("ERROR: " + err);
       } finally {
         finished = true;
+        additionalInfo.push(`output ${countTokens(text)} token`);
         delayUpdateCard();
         storeBotMsg.content = text;
         await chatStore.putMessage(storeBotMsg);
@@ -249,4 +263,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
   });
 
   return { router };
+}
+
+function countTokens(text: string) {
+  return encode(text).length;
 }
