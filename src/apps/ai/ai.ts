@@ -222,8 +222,9 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       let timer = 0;
       let finished = false;
 
+      const inputMsgCount = promptMessages.length - (systemContent ? 1 : 0);
       additionalInfo.push(
-        `input ${promptTokens} tokens (${promptMessages.length} msg)`,
+        `input ${promptTokens} tokens (${inputMsgCount} msg)`,
       );
 
       const stream = getCompletionStream({
