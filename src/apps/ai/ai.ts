@@ -89,7 +89,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       const chatState = await chatStore.getChat(chat_id, chat_type);
 
       if (textContent.startsWith("!")) {
-        const match = textContent.match(/^!(\w+)\s*(.*)$/m)!;
+        const match = textContent.match(/^!(\w+)\s*(.*)$/s)!;
         const [_, cmd, rest] = match;
         if (cmd === "reset" || cmd === "new") {
           delete chatState.lastMessageId;
