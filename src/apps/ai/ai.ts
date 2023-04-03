@@ -206,7 +206,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         promptMessages.push({ role: "system", content: systemContent });
       }
       if (replyTo) {
-        const messages = await chatStore.getMessageChain(replyTo, 3000);
+        const messages = await chatStore.getMessageChain(replyTo, 3900);
         promptMessages.push(
           ...messages.map((x) => ({ role: x.role, content: x.content })),
         );
