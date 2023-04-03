@@ -1,4 +1,4 @@
-import { countTokens, Message } from "./ai.ts";
+import { CONTEXT_TOKEN_LIMIT, countTokens, Message } from "./ai.ts";
 import { Database, IDbDocSet } from "https://deno.land/x/btrdb@v0.8.3/mod.ts";
 import { getDatabase } from "../../utils/db.ts";
 
@@ -10,6 +10,9 @@ export interface ChatState {
   settings: {
     systemPrompt?: string;
   };
+  requestCount: number;
+  inputTokenCount: number;
+  outputTokenCount: number;
 }
 
 export interface ChatMessage {
@@ -44,12 +47,7 @@ export class ChatStore {
       chat = { id, type, messages: [] } as any;
       await this.chats.insert(chat);
     }
-    if (!chat.settings) {
-      chat.settings = {};
-    }
-    if ("messages" in chat) {
-      delete chat.messages;
-    }
+    await this.migrateChat(chat);
     this.objMap.set(id, chat);
     return chat;
   }
@@ -103,5 +101,38 @@ export class ChatStore {
         await this.msgs.delete(id);
       }
     });
+  }
+
+  private async migrateChat(chat: ChatState) {
+    let migrated = false;
+    if (!chat.settings) {
+      chat.settings = {};
+      migrated = true;
+    }
+    if (chat.requestCount === undefined || isNaN(chat.outputTokenCount)) {
+      chat.requestCount = 0;
+      chat.inputTokenCount = 0;
+      chat.outputTokenCount = 0;
+      const msgs = await this.getMessagesByChatId(chat.id);
+      for (const msg of msgs) {
+        if (msg.role === "assistant") {
+          chat.requestCount += 1;
+          chat.outputTokenCount += msg.tokens ?? countTokens(msg.content);
+          if (msg.replyTo) {
+            chat.inputTokenCount +=
+              (await this.getMessageChain(msg.replyTo, CONTEXT_TOKEN_LIMIT))
+                .reduce((prev, x) => prev + x.tokens, 0);
+          }
+        }
+      }
+      migrated = true;
+    }
+    if ("messages" in chat) {
+      delete chat.messages;
+      migrated = true;
+    }
+    if (migrated) {
+      await this.updateChat(chat);
+    }
   }
 }

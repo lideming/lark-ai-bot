@@ -17,6 +17,8 @@ export interface AiAppConfig extends AppConfig {
   systemPrompt?: string;
 }
 
+export const CONTEXT_TOKEN_LIMIT = 3900;
+
 export function createApp(appId: string, appConfig: AiAppConfig) {
   const larkClient = new lark.Client({
     appId: appConfig.lark.appId,
@@ -169,8 +171,9 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
             responseText =
               "All history messages from this chat will be DELETED " +
               "and you will NOT be able to continue on deleted conversations.\n" +
+              "Stat counters won't be reset.\n" +
               'You can "!dump" all data before deleting.\n' +
-              'If you are sure, use "!delete_all_data I AM SURE" to proceed';
+              'If you are sure, use "!delete_all_data I AM SURE" to proceed.';
           }
           await larkClient.im.message.create({
             params: { receive_id_type: "chat_id" },
@@ -178,6 +181,25 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
               receive_id: chat_id,
               content: JSON.stringify(
                 getTextCard(responseText),
+              ),
+              msg_type: "interactive",
+            },
+          });
+          return;
+        }
+
+        if (cmd === "stat") {
+          await larkClient.im.message.create({
+            params: { receive_id_type: "chat_id" },
+            data: {
+              receive_id: chat_id,
+              content: JSON.stringify(
+                getTextCard(
+                  `[Chat Stat]\n` +
+                    `requests: ${chatState.requestCount}\n` +
+                    `input tokens: ${chatState.inputTokenCount}\n` +
+                    `output tokens: ${chatState.outputTokenCount}`,
+                ),
               ),
               msg_type: "interactive",
             },
@@ -206,7 +228,10 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         promptMessages.push({ role: "system", content: systemContent });
       }
       if (replyTo) {
-        const messages = await chatStore.getMessageChain(replyTo, 3900);
+        const messages = await chatStore.getMessageChain(
+          replyTo,
+          CONTEXT_TOKEN_LIMIT,
+        );
         promptMessages.push(
           ...messages.map((x) => ({ role: x.role, content: x.content })),
         );
@@ -310,6 +335,9 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
           tokens: outputTokens,
         };
         await chatStore.putMessage(storeBotMsg);
+        chatState.requestCount += 1;
+        chatState.inputTokenCount += promptTokens;
+        chatState.outputTokenCount += outputTokens;
         chatState.lastMessageId = cardMsgId;
         await chatStore.updateChat(chatState);
       }
