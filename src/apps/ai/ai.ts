@@ -1,6 +1,6 @@
 import { Router } from "../../dep.ts";
 import { getAiCard, getTextCard } from "./aiCard.ts";
-import { createEventHandler, lark } from "../../utils/lark.ts";
+import { createEventHandler, lark, uploadFile } from "../../utils/lark.ts";
 import {
   getCompletionStream,
   Message,
@@ -133,6 +133,55 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
               },
             });
           }
+          return;
+        }
+
+        if (cmd === "dump") {
+          const msgs = await chatStore.getMessagesByChatId(chat_id);
+          const dumpContent = createMessagesDump(msgs);
+          const fileKey = await uploadFile(larkClient, {
+            file_type: "stream",
+            file_name: `chat_dump_${
+              new Date().toISOString().replaceAll(":", "-")
+            }.md`,
+            file: dumpContent,
+          });
+          await larkClient.im.message.create({
+            params: { receive_id_type: "chat_id" },
+            data: {
+              receive_id: chat_id,
+              content: JSON.stringify({
+                file_key: fileKey,
+              }),
+              msg_type: "file",
+            },
+          });
+          return;
+        }
+
+        if (cmd === "delete_all_data") {
+          let responseText = "";
+          if (rest === "I AM SURE") {
+            const msgs = await chatStore.getMessagesByChatId(chat_id);
+            await chatStore.deleteMessages(msgs.map((x) => x.id));
+            responseText = "All history messages from this chat are deleted.";
+          } else {
+            responseText =
+              "All history messages from this chat will be DELETED " +
+              "and you will NOT be able to continue on deleted conversations.\n" +
+              'You can "!dump" all data before deleting.\n' +
+              'If you are sure, use "!delete_all_data I AM SURE" to proceed';
+          }
+          await larkClient.im.message.create({
+            params: { receive_id_type: "chat_id" },
+            data: {
+              receive_id: chat_id,
+              content: JSON.stringify(
+                getTextCard(responseText),
+              ),
+              msg_type: "interactive",
+            },
+          });
           return;
         }
       }
@@ -271,4 +320,25 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
 export function countTokens(text: string) {
   return encode(text).length;
+}
+
+function createMessagesDump(messages: ChatMessage[]) {
+  messages.sort((a, b) => +a.time - +b.time);
+  const result: string[] = [];
+  result.push(
+    `Dumped ${messages.length} messages`,
+  );
+  for (const msg of messages) {
+    result.push(`\n<div class='role-${msg.role}' id='${msg.id}'>\n`);
+    result.push(
+      `**${msg.role}** message time \`${
+        new Date(+msg.time).toISOString()
+      }\` id ${msg.id}${
+        msg.replyTo ? ` reply [${msg.replyTo}](#${msg.replyTo})` : ""
+      }`,
+    );
+    result.push("\n\t" + msg.content.split("\n").join("\n\t"));
+    result.push("\n</div>\n");
+  }
+  return result.join("\n");
 }

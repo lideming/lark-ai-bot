@@ -27,6 +27,9 @@ export class ChatStore {
     this.db = await getDatabase(id, "ai");
     this.chats = await this.db.createSet<ChatState>("chats", "doc");
     this.msgs = await this.db.createSet<ChatMessage>("msgs", "doc");
+    await this.msgs.useIndexes({
+      chat: (msg) => msg.chat,
+    });
     await this.db.commit();
   }
 
@@ -49,6 +52,10 @@ export class ChatStore {
     }
     this.objMap.set(id, chat);
     return chat;
+  }
+
+  async getMessagesByChatId(chatId: string) {
+    return await this.msgs.findIndex("chat", chatId);
   }
 
   async updateChat(chat: ChatState) {
@@ -86,6 +93,14 @@ export class ChatStore {
     await this.db.runTransaction(async () => {
       for (const msg of msgs) {
         await this.msgs.upsert(msg);
+      }
+    });
+  }
+
+  async deleteMessages(ids: string[]) {
+    await this.db.runTransaction(async () => {
+      for (const id of ids) {
+        await this.msgs.delete(id);
       }
     });
   }
