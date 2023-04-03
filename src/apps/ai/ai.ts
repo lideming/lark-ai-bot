@@ -157,7 +157,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         promptMessages.push({ role: "system", content: systemContent });
       }
       if (replyTo) {
-        const messages = await chatStore.getMessageChain(replyTo, 10);
+        const messages = await chatStore.getMessageChain(replyTo, 3000);
         promptMessages.push(
           ...messages.map((x) => ({ role: x.role, content: x.content })),
         );
@@ -187,16 +187,18 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         },
       });
 
+      const renderCard = () => {
+        return getAiCard(
+          text + (finished ? "" : "[...]"),
+          additionalInfo.join(" | "),
+        );
+      };
+
       const delayUpdateCard = () => {
         const updateCard = () => {
           larkClient.im.message.patch({
             data: {
-              content: JSON.stringify(
-                getAiCard(
-                  text + (finished ? "" : "[...]"),
-                  additionalInfo.join(" | "),
-                ),
-              ),
+              content: JSON.stringify(renderCard()),
             },
             path: { message_id: cardMsgId },
           }).catch((err) => {
@@ -215,7 +217,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       const msg = await larkClient.im.message.reply({
         path: { message_id: userMsg.message_id },
         data: {
-          content: JSON.stringify(getAiCard("", "")),
+          content: JSON.stringify(renderCard()),
           msg_type: "interactive",
         },
       });
@@ -229,20 +231,10 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         replyTo: replyTo,
         role: "user",
         content: textContent,
+        tokens: countTokens(textContent),
       };
 
-      const storeBotMsg: ChatMessage = {
-        id: cardMsgId,
-        chat: chat_id,
-        time: msg.data!.create_time!,
-        replyTo: userMsg.message_id,
-        role: "assistant",
-        content: "",
-      };
-
-      await chatStore.putMessage(storeUserMsg, storeBotMsg);
-      chatState.lastMessageId = cardMsgId;
-      await chatStore.updateChat(chatState);
+      await chatStore.putMessage(storeUserMsg);
 
       try {
         for await (const delta of stream) {
@@ -254,10 +246,22 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         additionalInfo.push("ERROR: " + err);
       } finally {
         finished = true;
-        additionalInfo.push(`output ${countTokens(text)} token`);
+        const outputTokens = countTokens(text);
+        additionalInfo.push(`output ${outputTokens} tokens`);
         delayUpdateCard();
-        storeBotMsg.content = text;
+
+        const storeBotMsg: ChatMessage = {
+          id: cardMsgId,
+          chat: chat_id,
+          time: msg.data!.create_time!,
+          replyTo: userMsg.message_id,
+          role: "assistant",
+          content: text,
+          tokens: outputTokens,
+        };
         await chatStore.putMessage(storeBotMsg);
+        chatState.lastMessageId = cardMsgId;
+        await chatStore.updateChat(chatState);
       }
     },
   });
@@ -265,6 +269,6 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
   return { router };
 }
 
-function countTokens(text: string) {
+export function countTokens(text: string) {
   return encode(text).length;
 }

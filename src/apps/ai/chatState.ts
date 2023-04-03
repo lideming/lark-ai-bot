@@ -1,4 +1,4 @@
-import { Message } from "./ai.ts";
+import { countTokens, Message } from "./ai.ts";
 import { Database, IDbDocSet } from "https://deno.land/x/btrdb@v0.8.3/mod.ts";
 import { getDatabase } from "../../utils/db.ts";
 
@@ -19,6 +19,7 @@ export interface ChatMessage {
   replyTo: string | undefined;
   role: Message["role"];
   content: string;
+  tokens: number;
 }
 
 export class ChatStore {
@@ -56,12 +57,25 @@ export class ChatStore {
     });
   }
 
-  async getMessageChain(msgId: string, maxCount: number) {
+  async getMessage(msgId: string) {
+    const msg = await this.msgs.get(msgId);
+    if (!msg) return null;
+    if (msg.tokens === undefined) {
+      msg.tokens = countTokens(msg.content);
+      this.putMessage(msg); // no await
+    }
+    return msg;
+  }
+
+  async getMessageChain(msgId: string, maxTokens: number) {
     let lastId = msgId as string | undefined;
     const result = [];
-    while (lastId && result.length < maxCount) {
-      const msg = await this.msgs.get(lastId);
+    let tokens = 0;
+    while (lastId) {
+      const msg = await this.getMessage(lastId);
       if (!msg) break;
+      if (tokens + msg.tokens > maxTokens) break;
+      tokens += msg.tokens;
       result.push(msg);
       lastId = msg.replyTo;
     }

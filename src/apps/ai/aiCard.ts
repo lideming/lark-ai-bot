@@ -5,7 +5,7 @@ export function getAiCard(text: string, additionalInfo: string) {
     const elements: any[] = [
       {
         tag: "markdown",
-        content: text || I("Thinking..."),
+        content: text,
       },
     ];
     if (additionalInfo) {
