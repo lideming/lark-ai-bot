@@ -94,15 +94,17 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         if (cmd === "reset" || cmd === "new") {
           delete chatState.lastMessageId;
           await chatStore.updateChat(chatState);
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify(getTextCard("[new conversation]")),
-              msg_type: "interactive",
-            },
-          });
-          if (!rest) return;
+          if (!rest) {
+            await larkClient.im.message.create({
+              params: { receive_id_type: "chat_id" },
+              data: {
+                receive_id: chat_id,
+                content: JSON.stringify(getTextCard("[new conversation]")),
+                msg_type: "interactive",
+              },
+            });
+            return;
+          }
           textContent = rest;
         }
 
@@ -247,23 +249,33 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         }
       }
 
-      const replyTo = userMsg.parent_id || chatState.lastMessageId;
+      let replyTo = userMsg.parent_id;
+
+      if (!replyTo && chatState.lastMessageId) {
+        const lastMsg = await chatStore.getMessage(chatState.lastMessageId);
+        if (lastMsg) {
+          if ((+lastMsg.time) >= Date.now() - (3600 * 1000)) {
+            replyTo = lastMsg.id;
+          }
+        }
+      }
 
       const systemContent = chatState.settings.systemPrompt ||
         appConfig.systemPrompt;
 
       const userInputMsg: Message = { role: "user", content: textContent };
       const promptMessages: Message[] = [];
+      let contextMessages: Message[] = [];
       if (systemContent) {
         promptMessages.push({ role: "system", content: systemContent });
       }
       if (replyTo) {
-        const messages = await chatStore.getMessageChain(
+        contextMessages = await chatStore.getMessageChain(
           replyTo,
           CONTEXT_TOKEN_LIMIT,
         );
         promptMessages.push(
-          ...messages.map((x) => ({ role: x.role, content: x.content })),
+          ...contextMessages.map((x) => ({ role: x.role, content: x.content })),
         );
       }
       promptMessages.push(userInputMsg);
@@ -278,6 +290,9 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       let timer = 0;
       let finished = false;
 
+      if (!contextMessages.length) {
+        additionalInfo.push("new conversation");
+      }
       const inputMsgCount = promptMessages.length - (systemContent ? 1 : 0);
       additionalInfo.push(
         `input ${promptTokens} tokens (${inputMsgCount} msg)`,
