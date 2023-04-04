@@ -4,8 +4,8 @@ import { createEventHandler, lark, uploadFile } from "../../utils/lark.ts";
 import {
   getCompletionStream,
   Message,
-} from "https://deno.land/x/openai_chat_stream@1.0.1/mod.ts";
-import { ChatMessage, ChatStore } from "./chatState.ts";
+} from "https://deno.land/x/openai_chat_stream@1.0.2/mod.ts";
+import { ChatMessage, ChatState, ChatStore } from "./chatState.ts";
 import { AppConfig } from "../../config.ts";
 import { encode } from "../../dep.ts";
 
@@ -206,16 +206,46 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
           });
           return;
         }
-      }
 
-      // if (chat_type === "group" && chatState.name === undefined) {
-      //   const groupInfo = await larkClient.im.chat.get({
-      //     path: {
-      //       chat_id: chat_id,
-      //     },
-      //   });
-      //   chatState.name = groupInfo.data?.name;
-      // }
+        if (cmd === "params") {
+          let responseText = "";
+          if (rest == "default") {
+            delete chatState.settings.params;
+            await chatStore.updateChat(chatState);
+            responseText = "Reset to default params.";
+          } else {
+            try {
+              const params: ChatState["settings"]["params"] = {};
+              const kv = rest.split(" ").map((x) => x.split("="));
+              if (!kv.length) throw new Error("No key=value pairs");
+              for (const [key, value] of kv) {
+                if (key === "top_p" || key === "temp") {
+                  params[key] = parseFloat(value);
+                } else {
+                  throw new Error("Unknown key " + key);
+                }
+              }
+              chatState.settings.params = params;
+              await chatStore.updateChat(chatState);
+              responseText = "Set new params.";
+            } catch (error) {
+              console.error("command !params parsing", error);
+              responseText = "Usage: !params [top_p=<number>] [temp=<number>]";
+            }
+          }
+          await larkClient.im.message.create({
+            params: { receive_id_type: "chat_id" },
+            data: {
+              receive_id: chat_id,
+              content: JSON.stringify(
+                getTextCard(responseText),
+              ),
+              msg_type: "interactive",
+            },
+          });
+          return;
+        }
+      }
 
       const replyTo = userMsg.parent_id || chatState.lastMessageId;
 
@@ -241,6 +271,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         (prev, cur) => prev + countTokens(cur.content),
         0,
       );
+      const chatParams = chatState.settings.params;
 
       let text = "";
       let additionalInfo: string[] = [];
@@ -251,10 +282,20 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       additionalInfo.push(
         `input ${promptTokens} tokens (${inputMsgCount} msg)`,
       );
+      if (chatParams?.temp !== undefined) {
+        additionalInfo.push(`temp=${chatParams.temp}`);
+      }
+      if (chatParams?.top_p !== undefined) {
+        additionalInfo.push(`top_p=${chatParams.top_p}`);
+      }
 
       const stream = getCompletionStream({
         apiKey: appConfig.token,
         messages: promptMessages,
+        params: {
+          top_p: chatParams?.top_p,
+          temperature: chatParams?.temp,
+        },
         onFinished: (reason) => {
           if (reason !== "stop") {
             additionalInfo.push("finished reason: " + reason);

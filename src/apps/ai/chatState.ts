@@ -8,6 +8,10 @@ export interface ChatState {
   lastMessageId?: string;
   settings: {
     systemPrompt?: string;
+    params?: {
+      temp?: number;
+      top_p?: number;
+    };
   };
   requestCount: number;
   inputTokenCount: number;
