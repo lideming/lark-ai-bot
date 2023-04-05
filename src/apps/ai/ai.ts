@@ -251,7 +251,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       let text = "";
       let additionalInfo: string[] = [];
-      let timer = 0;
+      let cardUpdateTimer = 0;
+      let cardUpdating = false;
       let finished = false;
 
       if (!contextMessages.length) {
@@ -289,21 +290,28 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         );
       };
 
-      const delayUpdateCard = () => {
-        const updateCard = () => {
-          larkClient.im.message.patch({
-            data: {
-              content: JSON.stringify(renderCard()),
-            },
-            path: { message_id: cardMsgId },
-          }).catch((err) => {
-            console.error("update card error", err);
-          });
-        };
+      const updateCard = () => {
+        if (cardUpdating) {
+          delayUpdateCard();
+          return;
+        }
+        cardUpdating = true;
+        larkClient.im.message.patch({
+          data: {
+            content: JSON.stringify(renderCard()),
+          },
+          path: { message_id: cardMsgId },
+        }).catch((err) => {
+          console.error("update card error", err);
+        }).finally(() => {
+          cardUpdating = false;
+        });
+      };
 
-        if (!timer) {
-          timer = setTimeout(() => {
-            timer = 0;
+      const delayUpdateCard = () => {
+        if (!cardUpdateTimer) {
+          cardUpdateTimer = setTimeout(() => {
+            cardUpdateTimer = 0;
             updateCard();
           }, 500);
         }
