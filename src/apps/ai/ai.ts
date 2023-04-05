@@ -8,6 +8,7 @@ import {
 import { ChatMessage, ChatState, ChatStore } from "./chatState.ts";
 import { AppConfig } from "../../config.ts";
 import { encode } from "../../dep.ts";
+import { search, SearchConfig } from "../../utils/internetSearch.ts";
 
 export type { Message };
 
@@ -15,6 +16,7 @@ export interface AiAppConfig extends AppConfig {
   // OpenAI api key
   token: string;
   systemPrompt?: string;
+  search?: SearchConfig;
 }
 
 export const CONTEXT_TOKEN_LIMIT = 3900;
@@ -102,109 +104,6 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         }
       }
 
-      const systemContent = chatState.settings.systemPrompt ||
-        appConfig.systemPrompt;
-
-      const userInputMsg: Message = { role: "user", content: inputText };
-      const promptMessages: Message[] = [];
-      let contextMessages: Message[] = [];
-      if (systemContent) {
-        promptMessages.push({ role: "system", content: systemContent });
-      }
-      if (replyTo) {
-        contextMessages = await chatStore.getMessageChain(
-          replyTo,
-          CONTEXT_TOKEN_LIMIT - countTokens(inputText),
-        );
-        promptMessages.push(
-          ...contextMessages.map((x) => ({ role: x.role, content: x.content })),
-        );
-      }
-      promptMessages.push(userInputMsg);
-      const promptTokens = promptMessages.reduce(
-        (prev, cur) => prev + countTokens(cur.content),
-        0,
-      );
-      const chatParams = chatState.settings.params;
-
-      let text = "";
-      let additionalInfo: string[] = [];
-      let cardUpdateTimer = 0;
-      let cardUpdating = false;
-      let finished = false;
-
-      if (!contextMessages.length) {
-        additionalInfo.push("new conversation");
-      }
-      const inputMsgCount = promptMessages.length - (systemContent ? 1 : 0);
-      additionalInfo.push(
-        `input ${promptTokens} tokens (${inputMsgCount} msg)`,
-      );
-      if (chatParams?.temp !== undefined) {
-        additionalInfo.push(`temp=${chatParams.temp}`);
-      }
-      if (chatParams?.top_p !== undefined) {
-        additionalInfo.push(`top_p=${chatParams.top_p}`);
-      }
-
-      const stream = getCompletionStream({
-        apiKey: appConfig.token,
-        messages: promptMessages,
-        params: {
-          top_p: chatParams?.top_p,
-          temperature: chatParams?.temp,
-        },
-        onFinished: (reason) => {
-          if (reason !== "stop") {
-            additionalInfo.push("finished reason: " + reason);
-          }
-        },
-      });
-
-      const renderCard = () => {
-        return getAiCard(
-          text + (finished ? "" : "[...]"),
-          additionalInfo.join(" | "),
-        );
-      };
-
-      const updateCard = () => {
-        if (cardUpdating) {
-          delayUpdateCard();
-          return;
-        }
-        cardUpdating = true;
-        larkClient.im.message.patch({
-          data: {
-            content: JSON.stringify(renderCard()),
-          },
-          path: { message_id: cardMsgId },
-        }).catch((err) => {
-          console.error("update card error", err);
-        }).finally(() => {
-          cardUpdating = false;
-        });
-      };
-
-      const delayUpdateCard = () => {
-        if (!cardUpdateTimer) {
-          cardUpdateTimer = setTimeout(() => {
-            cardUpdateTimer = 0;
-            updateCard();
-          }, 500);
-        }
-      };
-
-      const msg = await larkClient.im.message.reply({
-        path: { message_id: userMsg.message_id },
-        data: {
-          content: JSON.stringify(renderCard()),
-          msg_type: "interactive",
-        },
-      });
-
-      const cardMsgId = msg.data!.message_id!;
-
       const storeUserMsg: ChatMessage = {
         id: userMsg.message_id,
         chat: chat_id,
@@ -214,38 +113,160 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         content: inputText,
         tokens: countTokens(inputText),
       };
-
       await chatStore.putMessage(storeUserMsg);
+      await startCompletion(storeUserMsg.id);
 
-      try {
-        for await (const delta of stream) {
-          text += delta;
-          delayUpdateCard();
+      async function startCompletion(inputId: string) {
+        const systemContent = chatState.settings.systemPrompt ||
+          appConfig.systemPrompt;
+
+        const promptMessages: Message[] = [];
+        if (systemContent) {
+          promptMessages.push({ role: "user", content: systemContent });
         }
-      } catch (err) {
-        console.error("AI error", err);
-        additionalInfo.push("ERROR: " + err);
-      } finally {
-        finished = true;
-        const outputTokens = countTokens(text);
-        additionalInfo.push(`output ${outputTokens} tokens`);
-        delayUpdateCard();
+        const contextMessages = await chatStore.getMessageChain(
+          inputId,
+          CONTEXT_TOKEN_LIMIT,
+        );
+        promptMessages.push(
+          ...contextMessages.map((x) => ({
+            role: x.role,
+            content: x.content,
+          })),
+        );
+        const promptTokens = promptMessages.reduce(
+          (prev, cur) => prev + countTokens(cur.content),
+          0,
+        );
+        const chatParams = chatState.settings.params;
 
-        const storeBotMsg: ChatMessage = {
-          id: cardMsgId,
-          chat: chat_id,
-          time: msg.data!.create_time!,
-          replyTo: userMsg.message_id,
-          role: "assistant",
-          content: text,
-          tokens: outputTokens,
+        let text = "";
+        let additionalInfo: string[] = [];
+        let cardUpdateTimer = 0;
+        let cardUpdating = false;
+        let finished = false;
+
+        if (!contextMessages.length) {
+          additionalInfo.push("new conversation");
+        }
+        const inputMsgCount = promptMessages.length - (systemContent ? 1 : 0);
+        additionalInfo.push(
+          `input ${promptTokens} tokens (${inputMsgCount} msg)`,
+        );
+        if (chatParams?.temp !== undefined) {
+          additionalInfo.push(`temp=${chatParams.temp}`);
+        }
+        if (chatParams?.top_p !== undefined) {
+          additionalInfo.push(`top_p=${chatParams.top_p}`);
+        }
+
+        const stream = getCompletionStream({
+          apiKey: appConfig.token,
+          messages: promptMessages,
+          params: {
+            top_p: chatParams?.top_p,
+            temperature: chatParams?.temp,
+          },
+          onFinished: (reason) => {
+            if (reason !== "stop") {
+              additionalInfo.push("finished reason: " + reason);
+            }
+          },
+        });
+
+        const renderCard = () => {
+          return getAiCard(
+            text + (finished ? "" : "[...]"),
+            additionalInfo.join(" | "),
+          );
         };
-        await chatStore.putMessage(storeBotMsg);
-        chatState.requestCount += 1;
-        chatState.inputTokenCount += promptTokens;
-        chatState.outputTokenCount += outputTokens;
-        chatState.lastMessageId = cardMsgId;
-        await chatStore.updateChat(chatState);
+
+        const updateCard = () => {
+          if (cardUpdating) {
+            delayUpdateCard();
+            return;
+          }
+          cardUpdating = true;
+          larkClient.im.message.patch({
+            data: {
+              content: JSON.stringify(renderCard()),
+            },
+            path: { message_id: cardMsgId },
+          }).catch((err) => {
+            console.error("update card error", err);
+          }).finally(() => {
+            cardUpdating = false;
+          });
+        };
+
+        const delayUpdateCard = () => {
+          if (!cardUpdateTimer) {
+            cardUpdateTimer = setTimeout(() => {
+              cardUpdateTimer = 0;
+              updateCard();
+            }, 500);
+          }
+        };
+
+        const msg = await larkClient.im.message.reply({
+          path: { message_id: userMsg.message_id },
+          data: {
+            content: JSON.stringify(renderCard()),
+            msg_type: "interactive",
+          },
+        });
+
+        const cardMsgId = msg.data!.message_id!;
+
+        try {
+          for await (const delta of stream) {
+            text += delta;
+            delayUpdateCard();
+          }
+        } catch (err) {
+          console.error("AI error", err);
+          additionalInfo.push("ERROR: " + err);
+          return;
+        } finally {
+          finished = true;
+          const outputTokens = countTokens(text);
+          additionalInfo.push(`output ${outputTokens} tokens`);
+          delayUpdateCard();
+
+          const storeBotMsg: ChatMessage = {
+            id: cardMsgId,
+            chat: chat_id,
+            time: msg.data!.create_time!,
+            replyTo: inputId,
+            role: "assistant",
+            content: text,
+            tokens: outputTokens,
+          };
+          await chatStore.putMessage(storeBotMsg);
+          chatState.requestCount += 1;
+          chatState.inputTokenCount += promptTokens;
+          chatState.outputTokenCount += outputTokens;
+          chatState.lastMessageId = cardMsgId;
+          await chatStore.updateChat(chatState);
+        }
+
+        const response = await processAICommand(text);
+        if (response) {
+          console.info("response", response);
+          // promptMessages.push({ role: "assistant", content: text });
+          const systemContent = JSON.stringify(response);
+          const storeSystemMsg: ChatMessage = {
+            id: "system_" + cardMsgId,
+            chat: chat_id,
+            time: Date.now().toString(),
+            replyTo: cardMsgId,
+            role: "system",
+            content: systemContent,
+            tokens: countTokens(systemContent),
+          };
+          await chatStore.putMessage(storeSystemMsg);
+          await startCompletion(storeSystemMsg.id);
+        }
       }
     },
   });
@@ -256,12 +277,14 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
   ) {
     if (!inputText.startsWith("!")) return inputText;
 
+    const chat_id = chatState.id;
+
     const replySimpleText = async (text: string) => {
       await larkClient.im.message.create({
         params: { receive_id_type: "chat_id" },
         data: {
-          receive_id: chatState.id,
-          content: JSON.stringify(getTextCard("[new conversation]")),
+          receive_id: chat_id,
+          content: JSON.stringify(getTextCard(text)),
           msg_type: "interactive",
         },
       });
@@ -380,6 +403,36 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
     }
 
     return inputText;
+  }
+
+  async function processAICommand(text: string) {
+    const match = text.match(/<ai-command>(.*)<\/ai-command>/);
+    if (!match) return;
+    console.info({ match });
+    const commandString = match[1];
+    const parsed = JSON.parse(commandString);
+    console.info({ parsed });
+    const { cmd } = parsed;
+    if (cmd === "search_internet") {
+      if (!appConfig.search) {
+        return {
+          error:
+            "Command unavailable because search server config is missing.",
+        };
+      }
+      const { query } = parsed;
+      const result = await search(appConfig.search, query);
+      return {
+        results: result.results.slice(0, 10).map((x) => ({
+          title: x.title,
+          url: x.url,
+          content: x.content,
+          engine: x.engine,
+        })),
+      };
+    } else {
+      return { error: `command "${cmd}" not found` };
+    }
   }
 
   return { router };

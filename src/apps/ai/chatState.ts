@@ -82,7 +82,7 @@ export class ChatStore {
     while (lastId) {
       const msg = await this.getMessage(lastId);
       if (!msg) break;
-      if (tokens + msg.tokens > maxTokens) break;
+      if (result.length && tokens + msg.tokens > maxTokens) break;
       tokens += msg.tokens;
       result.push(msg);
       lastId = msg.replyTo;
