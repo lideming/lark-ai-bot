@@ -69,149 +69,27 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         return;
       }
 
-      let textContent: string = JSON.parse(data.message.content).text;
+      let inputText: string = JSON.parse(data.message.content).text;
 
-      if (textContent.includes("@_all")) {
+      if (inputText.includes("@_all")) {
         console.info("ignored message (@_all)");
         return;
       }
 
       if (data.message.mentions) {
         for (const mention of data.message.mentions) {
-          textContent = textContent.replaceAll(mention.key, "");
+          inputText = inputText.replaceAll(mention.key, "");
         }
       }
 
-      textContent = textContent.trim();
+      inputText = inputText.trim();
 
-      if (!textContent) return;
+      if (!inputText) return;
 
       const chatState = await chatStore.getChat(chat_id, chat_type);
 
-      const replySimpleText = async (text: string) => {
-        await larkClient.im.message.create({
-          params: { receive_id_type: "chat_id" },
-          data: {
-            receive_id: chat_id,
-            content: JSON.stringify(getTextCard("[new conversation]")),
-            msg_type: "interactive",
-          },
-        });
-      };
-
-      if (textContent.startsWith("!")) {
-        const match = textContent.match(/^!(\w+)\s*(.*)$/s)!;
-        const [_, cmd, rest] = match;
-        if (cmd === "reset" || cmd === "new") {
-          delete chatState.lastMessageId;
-          await chatStore.updateChat(chatState);
-          if (!rest) {
-            await replySimpleText("[new conversation]");
-            return;
-          }
-          textContent = rest;
-        }
-
-        if (cmd === "system") {
-          const systemPrompt = rest;
-          if (systemPrompt) {
-            if (systemPrompt === "default") {
-              delete chatState.settings.systemPrompt;
-            } else {
-              chatState.settings.systemPrompt = systemPrompt;
-            }
-            await chatStore.updateChat(chatState);
-            await replySimpleText("[system prompt updated]");
-          } else {
-            await replySimpleText(
-              chatState.settings.systemPrompt || "(default)",
-            );
-          }
-          return;
-        }
-
-        if (cmd === "dump") {
-          const msgs = await chatStore.getMessagesByChatId(chat_id);
-          const dumpContent = createMessagesDump(msgs);
-          const fileKey = await uploadFile(larkClient, {
-            file_type: "stream",
-            file_name: `chat_dump_${
-              new Date().toISOString().replaceAll(":", "-")
-            }.md`,
-            file: dumpContent,
-          });
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify({
-                file_key: fileKey,
-              }),
-              msg_type: "file",
-            },
-          });
-          return;
-        }
-
-        if (cmd === "delete_all_data") {
-          if (rest === "I AM SURE") {
-            const msgs = await chatStore.getMessagesByChatId(chat_id);
-            await chatStore.deleteMessages(msgs.map((x) => x.id));
-            await replySimpleText(
-              "All history messages from this chat are deleted.",
-            );
-          } else {
-            await replySimpleText(
-              "All history messages from this chat will be DELETED " +
-                "and you will NOT be able to continue on deleted conversations.\n" +
-                "Stat counters won't be reset.\n" +
-                'You can "!dump" all data before deleting.\n' +
-                'If you are sure, use "!delete_all_data I AM SURE" to proceed.',
-            );
-          }
-          return;
-        }
-
-        if (cmd === "stat") {
-          await replySimpleText(
-            `[Chat Stat]\n` +
-              `requests: ${chatState.requestCount}\n` +
-              `input tokens: ${chatState.inputTokenCount}\n` +
-              `output tokens: ${chatState.outputTokenCount}`,
-          );
-          return;
-        }
-
-        if (cmd === "params") {
-          let responseText = "";
-          if (rest == "default") {
-            delete chatState.settings.params;
-            await chatStore.updateChat(chatState);
-            responseText = "Reset to default params.";
-          } else {
-            try {
-              const params: ChatState["settings"]["params"] = {};
-              const kv = rest.split(" ").map((x) => x.split("="));
-              if (!kv.length) throw new Error("No key=value pairs");
-              for (const [key, value] of kv) {
-                if (key === "top_p" || key === "temp") {
-                  params[key] = parseFloat(value);
-                } else {
-                  throw new Error("Unknown key " + key);
-                }
-              }
-              chatState.settings.params = params;
-              await chatStore.updateChat(chatState);
-              responseText = "Set new params.";
-            } catch (error) {
-              console.error("command !params parsing", error);
-              responseText = "Usage: !params [top_p=<number>] [temp=<number>]";
-            }
-          }
-          await replySimpleText(responseText);
-          return;
-        }
-      }
+      inputText = await processUserCommand(chatState, inputText) || "";
+      if (!inputText) return;
 
       let replyTo = userMsg.parent_id;
 
@@ -227,7 +105,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       const systemContent = chatState.settings.systemPrompt ||
         appConfig.systemPrompt;
 
-      const userInputMsg: Message = { role: "user", content: textContent };
+      const userInputMsg: Message = { role: "user", content: inputText };
       const promptMessages: Message[] = [];
       let contextMessages: Message[] = [];
       if (systemContent) {
@@ -236,7 +114,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       if (replyTo) {
         contextMessages = await chatStore.getMessageChain(
           replyTo,
-          CONTEXT_TOKEN_LIMIT - countTokens(textContent),
+          CONTEXT_TOKEN_LIMIT - countTokens(inputText),
         );
         promptMessages.push(
           ...contextMessages.map((x) => ({ role: x.role, content: x.content })),
@@ -333,8 +211,8 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         time: data.message.create_time,
         replyTo: replyTo,
         role: "user",
-        content: textContent,
-        tokens: countTokens(textContent),
+        content: inputText,
+        tokens: countTokens(inputText),
       };
 
       await chatStore.putMessage(storeUserMsg);
@@ -371,6 +249,138 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       }
     },
   });
+
+  async function processUserCommand(
+    chatState: ChatState,
+    inputText: string,
+  ) {
+    if (!inputText.startsWith("!")) return inputText;
+
+    const replySimpleText = async (text: string) => {
+      await larkClient.im.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: {
+          receive_id: chatState.id,
+          content: JSON.stringify(getTextCard("[new conversation]")),
+          msg_type: "interactive",
+        },
+      });
+    };
+
+    const match = inputText.match(/^!(\w+)\s*(.*)$/s)!;
+    const [_, cmd, rest] = match;
+    if (cmd === "reset" || cmd === "new") {
+      delete chatState.lastMessageId;
+      await chatStore.updateChat(chatState);
+      if (!rest) {
+        await replySimpleText("[new conversation]");
+        return;
+      }
+      inputText = rest;
+    }
+
+    if (cmd === "system") {
+      const systemPrompt = rest;
+      if (systemPrompt) {
+        if (systemPrompt === "default") {
+          delete chatState.settings.systemPrompt;
+        } else {
+          chatState.settings.systemPrompt = systemPrompt;
+        }
+        await chatStore.updateChat(chatState);
+        await replySimpleText("[system prompt updated]");
+      } else {
+        await replySimpleText(
+          chatState.settings.systemPrompt || "(default)",
+        );
+      }
+      return;
+    }
+
+    if (cmd === "dump") {
+      const msgs = await chatStore.getMessagesByChatId(chat_id);
+      const dumpContent = createMessagesDump(msgs);
+      const fileKey = await uploadFile(larkClient, {
+        file_type: "stream",
+        file_name: `chat_dump_${
+          new Date().toISOString().replaceAll(":", "-")
+        }.md`,
+        file: dumpContent,
+      });
+      await larkClient.im.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: {
+          receive_id: chat_id,
+          content: JSON.stringify({
+            file_key: fileKey,
+          }),
+          msg_type: "file",
+        },
+      });
+      return;
+    }
+
+    if (cmd === "delete_all_data") {
+      if (rest === "I AM SURE") {
+        const msgs = await chatStore.getMessagesByChatId(chat_id);
+        await chatStore.deleteMessages(msgs.map((x) => x.id));
+        await replySimpleText(
+          "All history messages from this chat are deleted.",
+        );
+      } else {
+        await replySimpleText(
+          "All history messages from this chat will be DELETED " +
+            "and you will NOT be able to continue on deleted conversations.\n" +
+            "Stat counters won't be reset.\n" +
+            'You can "!dump" all data before deleting.\n' +
+            'If you are sure, use "!delete_all_data I AM SURE" to proceed.',
+        );
+      }
+      return;
+    }
+
+    if (cmd === "stat") {
+      await replySimpleText(
+        `[Chat Stat]\n` +
+          `requests: ${chatState.requestCount}\n` +
+          `input tokens: ${chatState.inputTokenCount}\n` +
+          `output tokens: ${chatState.outputTokenCount}`,
+      );
+      return;
+    }
+
+    if (cmd === "params") {
+      let responseText = "";
+      if (rest == "default") {
+        delete chatState.settings.params;
+        await chatStore.updateChat(chatState);
+        responseText = "Reset to default params.";
+      } else {
+        try {
+          const params: ChatState["settings"]["params"] = {};
+          const kv = rest.split(" ").map((x) => x.split("="));
+          if (!kv.length) throw new Error("No key=value pairs");
+          for (const [key, value] of kv) {
+            if (key === "top_p" || key === "temp") {
+              params[key] = parseFloat(value);
+            } else {
+              throw new Error("Unknown key " + key);
+            }
+          }
+          chatState.settings.params = params;
+          await chatStore.updateChat(chatState);
+          responseText = "Set new params.";
+        } catch (error) {
+          console.error("command !params parsing", error);
+          responseText = "Usage: !params [top_p=<number>] [temp=<number>]";
+        }
+      }
+      await replySimpleText(responseText);
+      return;
+    }
+
+    return inputText;
+  }
 
   return { router };
 }
