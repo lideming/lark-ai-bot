@@ -272,7 +272,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
       if (replyTo) {
         contextMessages = await chatStore.getMessageChain(
           replyTo,
-          CONTEXT_TOKEN_LIMIT,
+          CONTEXT_TOKEN_LIMIT - countTokens(textContent),
         );
         promptMessages.push(
           ...contextMessages.map((x) => ({ role: x.role, content: x.content })),
