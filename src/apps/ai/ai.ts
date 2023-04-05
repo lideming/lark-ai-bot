@@ -88,6 +88,17 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
 
       const chatState = await chatStore.getChat(chat_id, chat_type);
 
+      const replySimpleText = async (text: string) => {
+        await larkClient.im.message.create({
+          params: { receive_id_type: "chat_id" },
+          data: {
+            receive_id: chat_id,
+            content: JSON.stringify(getTextCard("[new conversation]")),
+            msg_type: "interactive",
+          },
+        });
+      };
+
       if (textContent.startsWith("!")) {
         const match = textContent.match(/^!(\w+)\s*(.*)$/s)!;
         const [_, cmd, rest] = match;
@@ -95,14 +106,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
           delete chatState.lastMessageId;
           await chatStore.updateChat(chatState);
           if (!rest) {
-            await larkClient.im.message.create({
-              params: { receive_id_type: "chat_id" },
-              data: {
-                receive_id: chat_id,
-                content: JSON.stringify(getTextCard("[new conversation]")),
-                msg_type: "interactive",
-              },
-            });
+            await replySimpleText("[new conversation]");
             return;
           }
           textContent = rest;
@@ -117,25 +121,11 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
               chatState.settings.systemPrompt = systemPrompt;
             }
             await chatStore.updateChat(chatState);
-            await larkClient.im.message.create({
-              params: { receive_id_type: "chat_id" },
-              data: {
-                receive_id: chat_id,
-                content: JSON.stringify(getTextCard("[system prompt updated]")),
-                msg_type: "interactive",
-              },
-            });
+            await replySimpleText("[system prompt updated]");
           } else {
-            await larkClient.im.message.create({
-              params: { receive_id_type: "chat_id" },
-              data: {
-                receive_id: chat_id,
-                content: JSON.stringify(
-                  getTextCard(chatState.settings.systemPrompt || "(default)"),
-                ),
-                msg_type: "interactive",
-              },
-            });
+            await replySimpleText(
+              chatState.settings.systemPrompt || "(default)",
+            );
           }
           return;
         }
@@ -164,48 +154,31 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         }
 
         if (cmd === "delete_all_data") {
-          let responseText = "";
           if (rest === "I AM SURE") {
             const msgs = await chatStore.getMessagesByChatId(chat_id);
             await chatStore.deleteMessages(msgs.map((x) => x.id));
-            responseText = "All history messages from this chat are deleted.";
+            await replySimpleText(
+              "All history messages from this chat are deleted.",
+            );
           } else {
-            responseText =
+            await replySimpleText(
               "All history messages from this chat will be DELETED " +
-              "and you will NOT be able to continue on deleted conversations.\n" +
-              "Stat counters won't be reset.\n" +
-              'You can "!dump" all data before deleting.\n' +
-              'If you are sure, use "!delete_all_data I AM SURE" to proceed.';
+                "and you will NOT be able to continue on deleted conversations.\n" +
+                "Stat counters won't be reset.\n" +
+                'You can "!dump" all data before deleting.\n' +
+                'If you are sure, use "!delete_all_data I AM SURE" to proceed.',
+            );
           }
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify(
-                getTextCard(responseText),
-              ),
-              msg_type: "interactive",
-            },
-          });
           return;
         }
 
         if (cmd === "stat") {
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify(
-                getTextCard(
-                  `[Chat Stat]\n` +
-                    `requests: ${chatState.requestCount}\n` +
-                    `input tokens: ${chatState.inputTokenCount}\n` +
-                    `output tokens: ${chatState.outputTokenCount}`,
-                ),
-              ),
-              msg_type: "interactive",
-            },
-          });
+          await replySimpleText(
+            `[Chat Stat]\n` +
+              `requests: ${chatState.requestCount}\n` +
+              `input tokens: ${chatState.inputTokenCount}\n` +
+              `output tokens: ${chatState.outputTokenCount}`,
+          );
           return;
         }
 
@@ -235,16 +208,7 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
               responseText = "Usage: !params [top_p=<number>] [temp=<number>]";
             }
           }
-          await larkClient.im.message.create({
-            params: { receive_id_type: "chat_id" },
-            data: {
-              receive_id: chat_id,
-              content: JSON.stringify(
-                getTextCard(responseText),
-              ),
-              msg_type: "interactive",
-            },
-          });
+          await replySimpleText(responseText);
           return;
         }
       }
