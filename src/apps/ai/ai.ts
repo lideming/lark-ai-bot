@@ -114,6 +114,9 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
         tokens: countTokens(inputText),
       };
       await chatStore.putMessage(storeUserMsg);
+
+      let hasRunAiCommand = false;
+
       await startCompletion(storeUserMsg.id);
 
       async function startCompletion(inputId: string) {
@@ -250,22 +253,25 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
           await chatStore.updateChat(chatState);
         }
 
-        const response = await processAICommand(text);
-        if (response) {
-          console.info("response", response);
-          // promptMessages.push({ role: "assistant", content: text });
-          const systemContent = JSON.stringify(response);
-          const storeSystemMsg: ChatMessage = {
-            id: "system_" + cardMsgId,
-            chat: chat_id,
-            time: Date.now().toString(),
-            replyTo: cardMsgId,
-            role: "system",
-            content: systemContent,
-            tokens: countTokens(systemContent),
-          };
-          await chatStore.putMessage(storeSystemMsg);
-          await startCompletion(storeSystemMsg.id);
+        if (!hasRunAiCommand) {
+          const response = await processAICommand(text);
+          if (response) {
+            hasRunAiCommand = true;
+            console.info("response", response);
+            // promptMessages.push({ role: "assistant", content: text });
+            const systemContent = JSON.stringify(response);
+            const storeSystemMsg: ChatMessage = {
+              id: "system_" + cardMsgId,
+              chat: chat_id,
+              time: Date.now().toString(),
+              replyTo: cardMsgId,
+              role: "system",
+              content: systemContent,
+              tokens: countTokens(systemContent),
+            };
+            await chatStore.putMessage(storeSystemMsg);
+            await startCompletion(storeSystemMsg.id);
+          }
         }
       }
     },
@@ -416,14 +422,13 @@ export function createApp(appId: string, appConfig: AiAppConfig) {
     if (cmd === "search_internet") {
       if (!appConfig.search) {
         return {
-          error:
-            "Command unavailable because search server config is missing.",
+          error: "Command unavailable because search server config is missing.",
         };
       }
       const { query } = parsed;
       const result = await search(appConfig.search, query);
       return {
-        results: result.results.slice(0, 10).map((x) => ({
+        results: result.results.slice(0, 6).map((x) => ({
           title: x.title,
           url: x.url,
           content: x.content,
